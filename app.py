@@ -1,76 +1,72 @@
 import google.generativeai as genai
 import os
+import logging
 from dotenv import load_dotenv
 from flask import Flask, request, abort
-from linebot.v3.webhook import WebhookHandler, Event
-from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.messaging.models import TextMessage
-from linebot import LineBotApi, WebhookHandler
-from linebot.models import (
-    MessageEvent, 
-    TextMessage, 
-    TextSendMessage,
-    ImageSendMessage)
-from linebot.exceptions import InvalidSignatureError
-import logging
 
-genai.configure(api_key="AIzaSyBcSLZ73afUx3WjhaQZrhCW6GEerXgJJqc")
-model = genai.GenerativeModel('Gemini 3.1 Flash-Lite')
-# 加載 .env 文件中的變數
+# 統一使用 linebot v2 的導入方式
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
+
+# 加載 .env 文件
 load_dotenv()
 
-# 從環境變數中讀取 LINE 的 Channel Access Token 和 Channel Secret
+# 設定 API Key 與 Token (請確保你的 .env 檔有這三項)
+genai_key = os.getenv('GOOGLE_API_KEY')
 line_token = os.getenv('LINE_TOKEN')
 line_secret = os.getenv('LINE_SECRET')
 
-# 檢查是否設置了環境變數
-if not line_token or not line_secret:
-    print(f"LINE_TOKEN: {line_token}")  # 調試輸出
-    print(f"LINE_SECRET: {line_secret}")  # 調試輸出
-    raise ValueError("LINE_TOKEN 或 LINE_SECRET 未設置")
+# 設定 Google Gemini
+genai.configure(api_key=genai_key)
+# 修正模型名稱為標準 ID
+model = genai.GenerativeModel('gemini-1.5-flash') 
 
-# 初始化 LineBotApi 和 WebhookHandler
+# 初始化 LINE API
 line_bot_api = LineBotApi(line_token)
 handler = WebhookHandler(line_secret)
 
-# 創建 Flask 應用
 app = Flask(__name__)
-
 app.logger.setLevel(logging.DEBUG)
 
-# 設置一個路由來處理 LINE Webhook 的回調請求
 @app.route("/", methods=['POST'])
 def callback():
-    # 取得 X-Line-Signature 標頭
-    signature = request.headers['X-Line-Signature']
-
-    # 取得請求的原始內容
+    signature = request.headers.get('X-Line-Signature')
     body = request.get_data(as_text=True)
-    app.logger.info(f"Request body: {body}")
-
-    # 驗證簽名並處理請求
+    
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
+        app.logger.error("無效的簽名，請檢查 Channel Secret")
         abort(400)
-
     return 'OK'
 
-# 設置一個事件處理器來處理 TextMessage 事件
 @handler.add(MessageEvent, message=TextMessage)
-def handle_message(event: Event):
-    if event.message.type == "text":
-        user_message = event.message.text  # 使用者的訊息
-        app.logger.info(f"收到的訊息: {user_message}")
-       #蝦
-        response = model.generate_content(user_message) # 傳送使用者的問題給 Gemini
-        reply_text = response.text if response else "抱歉，我無法回答這個問題。"
+def handle_message(event):
+    user_message = event.message.text
+    app.logger.info(f"收到的訊息: {user_message}")
 
+    try:
+        # 呼叫 Gemini 生成回應
+        response = model.generate_content(user_message)
+        
+        # 檢查 response 是否有內容
+        if response and response.text:
+            reply_text = response.text
+        else:
+            reply_text = "抱歉，我暫時無法處理這段訊息。"
+            
+    except Exception as e:
+        app.logger.error(f"Gemini API 錯誤: {e}")
+        reply_text = "機器人思考時發生錯誤，請稍後再試。"
 
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=reply_text)
-        )
-# 應用程序入口點
+    # 回覆 LINE 訊息
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply_text)
+    )
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    # 確保埠號與 Render/Heroku 等平台相容
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
