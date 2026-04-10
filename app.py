@@ -62,9 +62,7 @@ def handle_message(event: Event):
     if event.message.type == "text":
         user_message = event.message.text  # 使用者的訊息
         app.logger.info(f"收到的訊息: {user_message}")
-
-        # 使用 GPT 生成回應
-    else:
+       #蝦
         response = model.generate_content(user_message) # 傳送使用者的問題給 Gemini
         reply_text = response.text if response else "抱歉，我無法回答這個問題。"
 
