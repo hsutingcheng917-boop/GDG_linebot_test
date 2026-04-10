@@ -1,6 +1,4 @@
 import google.generativeai as genai
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-3")
 import os
 from dotenv import load_dotenv
 from flask import Flask, request, abort
@@ -16,6 +14,8 @@ from linebot.models import (
 from linebot.exceptions import InvalidSignatureError
 import logging
 
+genai.configure(api_key="AIzaSyBcSLZ73afUx3WjhaQZrhCW6GEerXgJJqc")
+model = genai.GenerativeModel('gemini-1.5-flash')
 # 加載 .env 文件中的變數
 load_dotenv()
 
