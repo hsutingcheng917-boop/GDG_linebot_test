@@ -15,7 +15,7 @@ from linebot.exceptions import InvalidSignatureError
 import logging
 
 genai.configure(api_key="AIzaSyBcSLZ73afUx3WjhaQZrhCW6GEerXgJJqc")
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('Gemini 3.1 Flash-Lite')
 # 加載 .env 文件中的變數
 load_dotenv()
 
