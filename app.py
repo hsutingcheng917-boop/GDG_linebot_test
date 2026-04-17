@@ -8,25 +8,45 @@ from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 
+# 1. 初始化與環境設定
 load_dotenv()
-
-# 1. 取得金鑰並初始化
-genai_key = os.getenv('GOOGLE_API_KEY')
-genai.configure(api_key=genai_key)
-
-# 2. 初始化模型：改用完整路徑名稱
-# 如果 1.5-flash 還是 404，請嘗試改回 'gemini-pro' (這是最舊但也最穩定的名稱)
-try:
-    model = genai.GenerativeModel('models/gemini-1.5-flash')
-except:
-    model = genai.GenerativeModel('gemini-pro')
-
-line_token = os.getenv('LINE_TOKEN')
-line_secret = os.getenv('LINE_SECRET')
-line_bot_api = LineBotApi(line_token)
-handler = WebhookHandler(line_secret)
-
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
+
+# 2. 初始化 Gemini (帶有自動偵測邏輯)
+genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
+
+def initialize_model():
+    try:
+        # 列出所有可用的模型
+        available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        logging.info(f"可用模型清單: {available}")
+        
+        # 依照優先順序尋找模型
+        # 3.1 目前不存在，我們尋找 2.0-flash-lite 或 1.5-flash
+        target_models = [
+            'models/gemini-2.0-flash-lite-preview-02-05',
+            'models/gemini-2.0-flash',
+            'models/gemini-1.5-flash',
+            'models/gemini-pro'
+        ]
+        
+        for target in target_models:
+            if target in available:
+                logging.info(f"成功選定模型: {target}")
+                return genai.GenerativeModel(target)
+        
+        # 如果都沒找到，就用最通用的
+        return genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        logging.error(f"初始化模型失敗: {e}")
+        return genai.GenerativeModel('gemini-1.5-flash')
+
+model = initialize_model()
+
+# 3. 初始化 LINE API
+line_bot_api = LineBotApi(os.getenv('LINE_TOKEN'))
+handler = WebhookHandler(os.getenv('LINE_SECRET'))
 
 @app.route("/", methods=['POST'])
 def callback():
@@ -42,24 +62,25 @@ def callback():
 def handle_message(event):
     user_text = event.message.text
     try:
-        # 產生內容
+        # 呼叫 Gemini
         response = model.generate_content(user_text)
         
-        # 增加一個保險：如果 response 失敗的處理
-        if hasattr(response, 'text'):
+        if response and response.text:
             reply_text = response.text
         else:
-            reply_text = "模型目前沒有回傳文字，請稍後再試。"
+            reply_text = "模型未回傳文字，可能是觸發了安全過濾。"
             
     except Exception as e:
         error_msg = str(e)
         logging.error(f"Gemini Error: {error_msg}")
         
-        # 如果還是 404，回傳更直覺的檢查清單
+        # 針對 404 顯示更細節的資訊
         if "404" in error_msg:
-            reply_text = "【連線失敗 404】請務必在 Render 執行 'Clear Cache & Deploy'。"
+            reply_text = f"連線失敗(404)：API不支援此模型名稱。請檢查 Google AI Studio 是否有權限。"
+        elif "429" in error_msg:
+            reply_text = "額度用盡(429)：請稍等一分鐘後再試。"
         else:
-            reply_text = f"思考發生錯誤：{error_msg[:50]}"
+            reply_text = f"思考錯誤：{error_msg[:100]}"
 
     line_bot_api.reply_message(
         event.reply_token,
