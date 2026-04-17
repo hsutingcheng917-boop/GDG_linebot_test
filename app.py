@@ -4,7 +4,7 @@ import logging
 from dotenv import load_dotenv
 from flask import Flask, request, abort
 
-# 統一使用 v2 穩定版導入，確保與你的 reply_message 邏輯相容
+# 統一使用 v2 穩定版導入
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
@@ -13,21 +13,23 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 load_dotenv()
 
 # 2. 設定 Gemini 模型
-# 使用 1.5-flash 以解決 404 找不到模型的問題，這是目前最穩定的 Flash (Lite) 模型
-genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
-model = genai.GenerativeModel('gemini-1.5-flash')
+# 嘗試使用 -latest 結尾，這通常能解決 404 找不到特定版本的問題
+MODEL_NAME = 'gemini-1.5-flash-latest'
+
+# 取得 API Key
+genai_key = os.getenv('GOOGLE_API_KEY')
+genai.configure(api_key=genai_key)
+
+# 建立模型實例
+model = genai.GenerativeModel(MODEL_NAME)
 
 # 3. 初始化 LINE API
 line_token = os.getenv('LINE_TOKEN')
 line_secret = os.getenv('LINE_SECRET')
 
-if not line_token or not line_secret:
-    raise ValueError("環境變數 LINE_TOKEN 或 LINE_SECRET 缺失，請在 Render 後台設定。")
-
 line_bot_api = LineBotApi(line_token)
 handler = WebhookHandler(line_secret)
 
-# 4. 建立 Flask 應用
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -54,12 +56,16 @@ def handle_message(event):
         if response and response.text:
             reply_text = response.text
         else:
-            reply_text = "機器人目前無法產生回應，請換個方式問問看。"
+            reply_text = "模型目前沒有回傳內容，請嘗試換個問題。"
             
     except Exception as e:
         app.logger.error(f"Gemini 錯誤: {e}")
-        # 將錯誤訊息簡化回傳，方便你即時除錯
-        reply_text = f"思考發生錯誤：{str(e)[:50]}"
+        # 如果還是 404，回傳更具體的提示
+        error_msg = str(e)
+        if "404" in error_msg:
+            reply_text = "連線失敗：請確認 Google API Key 是否有效並已更換新金鑰。"
+        else:
+            reply_text = f"思考發生錯誤：{error_msg[:50]}"
 
     # 回覆訊息
     line_bot_api.reply_message(
@@ -68,6 +74,5 @@ def handle_message(event):
     )
 
 if __name__ == "__main__":
-    # Render 部署關鍵：讀取動態 PORT 並監聽 0.0.0.0
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
