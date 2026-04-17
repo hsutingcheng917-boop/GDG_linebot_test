@@ -4,7 +4,7 @@ import logging
 from dotenv import load_dotenv
 from flask import Flask, request, abort
 
-# 使用穩定版 line-bot-sdk v2 導入方式
+# 統一使用 v2 穩定版導入，確保與你的 reply_message 邏輯相容
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
@@ -12,26 +12,17 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 # 1. 載入環境變數
 load_dotenv()
 
-# 2. 配置 Gemini 3.1 (即 2.0 Flash-Lite)
-# 注意：API 正式識別碼為以下字串，請確保 google-generativeai 套件為最新版
-MODEL_ID = 'gemini-2.0-flash-lite-preview-02-05' 
-
+# 2. 設定 Gemini 模型
+# 使用 1.5-flash 以解決 404 找不到模型的問題，這是目前最穩定的 Flash (Lite) 模型
 genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
-# 設定安全設定，避免模型因過度檢查而拒絕回答
-safety_settings = [
-    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-]
-model = genai.GenerativeModel(model_name=MODEL_ID, safety_settings=safety_settings)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# 3. 初始化 LINE API (從環境變數讀取)
+# 3. 初始化 LINE API
 line_token = os.getenv('LINE_TOKEN')
 line_secret = os.getenv('LINE_SECRET')
 
 if not line_token or not line_secret:
-    raise ValueError("請在環境變數中設定 LINE_TOKEN 與 LINE_SECRET")
+    raise ValueError("環境變數 LINE_TOKEN 或 LINE_SECRET 缺失，請在 Render 後台設定。")
 
 line_bot_api = LineBotApi(line_token)
 handler = WebhookHandler(line_secret)
@@ -57,28 +48,26 @@ def handle_message(event):
     user_text = event.message.text
     
     try:
-        # 呼叫 Gemini 生成回應
+        # 呼叫 Gemini
         response = model.generate_content(user_text)
         
-        # 檢查回應是否成功生成文字
         if response and response.text:
             reply_text = response.text
         else:
-            reply_text = "核心模型未回傳文字，可能是內容觸發了安全過濾。"
+            reply_text = "機器人目前無法產生回應，請換個方式問問看。"
             
     except Exception as e:
-        app.logger.error(f"Gemini 發生錯誤: {e}")
-        # 如果模型 ID 報錯，會顯示在這邊
-        reply_text = f"機器人思考發生錯誤，原因：{str(e)[:50]}"
+        app.logger.error(f"Gemini 錯誤: {e}")
+        # 將錯誤訊息簡化回傳，方便你即時除錯
+        reply_text = f"思考發生錯誤：{str(e)[:50]}"
 
-    # 回覆訊息給 LINE 使用者
+    # 回覆訊息
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply_text)
     )
 
 if __name__ == "__main__":
-    # Render 環境必備：讀取動態 PORT
+    # Render 部署關鍵：讀取動態 PORT 並監聽 0.0.0.0
     port = int(os.environ.get('PORT', 10000))
-    # host 必須為 0.0.0.0
     app.run(host='0.0.0.0', port=port)
