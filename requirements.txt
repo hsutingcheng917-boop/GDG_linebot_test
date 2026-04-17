@@ -1,9 +1,5 @@
-python-dotenv
 flask
+python-dotenv
 line-bot-sdk
-lxml
+google-generativeai>=0.8.3
 gunicorn
-pymongo
-imgurpython
-requests
-google-generativeai>=0.8.0
